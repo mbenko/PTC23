@@ -1,0 +1,157 @@
+
+name: App-Inflation.v2020.05.15
+# No CI Trigger
+trigger: none
+
+variables:
+  DEVOPS_ORGANIZATION_URL: https://dev.azure.com/imademo
+  DEVOPS_PROJECT_NAME: $(APP_NAME)
+
+stages:
+- stage: Blueprint_Assignment
+
+  jobs:
+  - job: Assign_blueprint
+    pool:
+      vmImage: 'windows-2019'
+    steps:
+
+      - bash: |
+          NOW=$(date +%m%d)
+          RG_NAME=rg-$(APP_NAME)-$NOW
+          DEVOPS_PROJECT_NAME=dg-$(APP_NAME)-$NOW
+          echo $DEVOPS_PROJECT_NAME
+
+          myFile=bp-assignment.json 
+          echo "{   "                                                               > bp-assignment.json 
+          echo "  \"properties\": { "                                              >> bp-assignment.json
+          echo "    \"blueprintId\": \"/subscriptions/$ARM_SUBSCRIPTION_ID/providers/Microsoft.Blueprint/blueprints/bp-ImaDemoApp-Shared\", " >> bp-assignment.json
+          echo "    \"resourceGroups\": { "                                        >> bp-assignment.json
+          echo "      \"ProdRG\": { "                                              >> bp-assignment.json
+          echo "        \"name\": \"$RG_NAME\", "                                >> bp-assignment.json
+          echo "        \"location\": \"centralus\" "                              >> bp-assignment.json
+          echo "      } "                                                          >> bp-assignment.json
+          echo "    }, "                                                           >> bp-assignment.json
+          echo "    \"parameters\": { "                                            >> bp-assignment.json
+          echo "      \"principalIds\": { "                                        >> bp-assignment.json
+          echo "         \"value\": [\"$(PROJECT_OWNER_SID)\"] "                   >> bp-assignment.json
+          echo "      }, "                                                         >> bp-assignment.json
+          echo "      \"dashboardName\": { \"value\":\"$(APP_NAME) Demo\"} "            >> bp-assignment.json
+          echo "    } "                                                            >> bp-assignment.json
+          echo "  }, "                                                             >> bp-assignment.json
+          echo "  \"identity\": { "                                                >> bp-assignment.json
+          echo "    \"type\": \"SystemAssigned\" "                                 >> bp-assignment.json
+          echo "  }, "                                                             >> bp-assignment.json
+          echo "  \"location\": \"westus\" "                                       >> bp-assignment.json
+          echo "} "                                                                >> bp-assignment.json          
+
+          cat bp-assignment.json
+
+        name: Create_BP_assignment_file
+
+      - task: AzurePowerShell@5
+        inputs:
+          azureSubscription: 'FY22-MVP-ImaDemo(b8c7d821-4fbb-4089-8978-b966512a6a45)'
+          ScriptType: 'InlineScript'
+          Inline: |
+
+            $TODAY=Get-Date -Format "MMdd"
+            $ASSIGNMENT_NAME = "bp-assignment-$(APP_NAME)-$TODAY"
+
+            write-output "ARM_TENANT_ID --> $env:ARM_TENANT_ID"
+            write-output "ARM_CLIENT_ID --> $env:ARM_CLIENT_ID"
+            write-output "ARM_SUBSCRIPTION_ID --> $env:ARM_SUBSCRIPTION_ID"
+            write-output "ARM_SUBSCRIPTION_NAME --> $env:ARM_SUBSCRIPTION_NAME"
+            write-output "DEVOPS_PROJECT_NAME --> $DEVOPS_PROJECT_NAME"
+            write-output "ASSIGNMENT_NAME --> $ASSIGNMENT_NAME"
+
+            write-output " ---> Create credentials"
+            $passwd = ConvertTo-SecureString $(ARM_CLIENT_SECRET) -AsPlainText -Force
+            $pscredential = New-Object System.Management.Automation.PSCredential($env:ARM_CLIENT_ID, $passwd)
+
+            write-output " ---> Log into Azure with SPN..."
+            Connect-AzAccount -ServicePrincipal -Credential $pscredential -TenantId $env:ARM_TENANT_ID
+            
+            write-output " ---> Set Context..."
+            Set-AzContext -Name $(ARM_SUBSCRIPTION_NAME)-spn -subscription $env:ARM_SUBSCRIPTION_ID -Tenant $env:ARM_TENANT_ID
+
+            # Install and assign the blueprint with the SPN's credentials
+            write-output " ---> Install Az.Blueprint module"
+            install-module -Name Az.Blueprint -Force -maximumVersion 0.2.12
+            get-command -module 'Az.Blueprint' -commandtype 'cmdlet'
+
+            write-output " ---> Get Blueprint..."
+            $myBlueprint = Get-AzBlueprint -SubscriptionId $env:ARM_SUBSCRIPTION_ID -Name 'bp-imademoapp-shared'
+            $myBlueprint
+
+            write-output " ---> Assign Blueprint..."
+            $assignment = New-AzBlueprintAssignment -Name $ASSIGNMENT_NAME -Blueprint $myBlueprint -AssignmentFile bp-assignment.json
+
+            write-output " ---> SUCCESS"
+
+
+          azurePowerShellVersion: 'LatestVersion'
+
+- stage: Azure_DevOps
+  dependsOn: Blueprint_Assignment
+  jobs:
+  - job: Create_Azure_DevOps_Project
+    pool:
+      vmImage: 'ubuntu-latest'    
+    steps:
+      - bash: |
+          set -euxo pipefail
+
+          echo "---> Set_Vars"
+
+          echo "Checking required pipeline variables. These must be supplied as pipeline variables."
+          NOW=$(date +%m%d)
+          RG_NAME=rg-$(APP_NAME)-$NOW
+          DEVOPS_PROJECT_NAME=dg-$(APP_NAME)-$NOW
+
+          # TEMP HACK TO NOT INCLUDE DATE ON NAME...use lz as prefix for LandingZone
+          # RG_NAME=dg-$(APP_NAME)-$NOW
+          # DEVOPS_PROJECT_NAME=lz-$(APP_NAME)
+
+
+          echo RG_NAME=$RG_NAME
+          echo DEVOPS_PROJECT_NAME=$DEVOPS_PROJECT_NAME
+          echo PROJECT_ADMINISTRATOR_EMAIL=$PROJECT_ADMINISTRATOR_EMAIL
+
+          echo "---> Create_Azure_RG"
+
+          # create resource group
+          az login --service-principal --user $ARM_CLIENT_ID --password $(ARM_CLIENT_SECRET) --tenant $ARM_TENANT_ID
+          az group create --location "centralus" --name $RG_NAME --subscription $ARM_SUBSCRIPTION_ID --tags costCenter=Demos CreatedBy=ImaDevOps owner=$PROJECT_ADMINISTRATOR_EMAIL created=$(Build.BuildNumber)
+
+
+          echo "---> Create_DevOps_Project"
+
+          # log into devops
+          az extension add --name azure-devops
+          echo $AZURE_DEVOPS_CLI_PAT | az devops login --org $DEVOPS_ORGANIZATION_URL
+
+          az devops project list --org $DEVOPS_ORGANIZATION_URL --output table
+
+          # get project id to check if it exists
+          project_id=$(az devops project list --org $DEVOPS_ORGANIZATION_URL --query "[?name=='$DEVOPS_PROJECT_NAME'].id" --output tsv)
+          
+          # create project
+          if [ -z $project_id ]
+          then
+             az devops project create --name "$DEVOPS_PROJECT_NAME" --source-control git --visibility private --organization $DEVOPS_ORGANIZATION_URL
+          else
+             echo "DevOps Project $DEVOPS_PROJECT_NAME already exists."
+          fi    
+
+          # get group descriptor for administrators of this project
+          groupDescriptor="$(az devops security group list --org $DEVOPS_ORGANIZATION_URL --project "$DEVOPS_PROJECT_NAME" --output json --query "graphGroups[?displayName == 'Project Administrators'].descriptor | [0]" -o tsv)"
+
+          # add user to org
+          #az devops user add --email-id $PROJECT_ADMINISTRATOR_EMAIL --org $DEVOPS_ORGANIZATION_URL --license-type express --send-email-invite false
+
+          # add user to project group
+          az devops security group membership add --org $DEVOPS_ORGANIZATION_URL --group-id  $groupDescriptor --member-id $PROJECT_ADMINISTRATOR_EMAIL
+          
+        env:
+          AZURE_DEVOPS_CLI_PAT: $(System.AccessToken)
