@@ -4,6 +4,14 @@
     <TargetFramework>net7.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationInsightsResourceId>/subscriptions/b8c7d821-4fbb-4089-8978-b966512a6a45/resourceGroups/rg-ptc-poc-weu/providers/microsoft.insights/components/myDadApp-ai</ApplicationInsightsResourceId>
+    <UserSecretsId>bfbe4099-9900-4607-9e8d-6324f76e2d01</UserSecretsId>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.0.0" />
+    <PackageReference Include="Azure.Identity" Version="1.6.0" />
+    <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.15.0" />
+  </ItemGroup>
 
 </Project>

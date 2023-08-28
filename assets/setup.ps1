@@ -9,6 +9,8 @@ dotnet new razor -o code/myDadApp
 dotnet new gitignore
 
 ## Add Code & test
+devenv .\ptc23.sln
+
 
 # PowerShell Terminal
 az login

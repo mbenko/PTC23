@@ -1,0 +1,14 @@
+{
+  "dependencies": {
+    "secrets2": {
+      "secretStore": "AzureAppSettings",
+      "resourceId": "/subscriptions/[parameters('subscriptionId')]/resourceGroups/[parameters('resourceGroupName')]/providers/Microsoft.KeyVault/vaults/imaKeyvault",
+      "type": "secrets.keyVault",
+      "connectionId": "VaultUri"
+    },
+    "secrets1": {
+      "ignored": "true",
+      "type": "secrets"
+    }
+  }
+}
